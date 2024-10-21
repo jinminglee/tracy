@@ -327,7 +327,7 @@ void View::ExportToCsv(std::string filePath, const Vector<short_ptr<ZoneEvent>>&
     std::ofstream outFile(filePath);
     if (outFile.is_open())
     {
-        outFile << "Name,MemAlloc,MemFree,MemChanged,MemAllocTimes,MemFreeTimes,ExecuteTime,SelfTime,Function"<<std::endl;
+        outFile << "Name,MemAlloc,MemFree,MemChanged,MemAllocBytes,MemFreeBytes,MemChangedBytes,MemAllocTimes,MemFreeTimes,ExecuteTime,SelfTime,Function"<<std::endl;
         for (auto sorted_zone : sortedZones)
         {  
             int64_t selfTimespan;
@@ -338,7 +338,10 @@ void View::ExportToCsv(std::string filePath, const Vector<short_ptr<ZoneEvent>>&
             outFile << GetZoneName(*sorted_zone, DynamicName) <<
                 "," << MemSizeToString(l->second.cAlloc) <<
                 "," << MemSizeToString(l->second.cFree) <<
-                "," << MemSizeToString(l->second.cAlloc - l->second.cFree) <<
+                "," << MemSizeToString(l->second.cAlloc - l->second.cFree) <
+                "," << (l->second.cAlloc) <<
+                "," << (l->second.cFree) <<
+                "," << (l->second.cAlloc - l->second.cFree) <<
                "," << l->second.nAlloc <<
                "," << l->second.nFree <<
                    "," << TimeToString( m_worker.GetZoneEndDirect( *sorted_zone ) - sorted_zone->Start() ) <<
