@@ -338,7 +338,7 @@ void View::ExportToCsv(std::string filePath, const Vector<short_ptr<ZoneEvent>>&
             outFile << GetZoneName(*sorted_zone, DynamicName) <<
                 "," << MemSizeToString(l->second.cAlloc) <<
                 "," << MemSizeToString(l->second.cFree) <<
-                "," << MemSizeToString(l->second.cAlloc - l->second.cFree) <
+                "," << MemSizeToString(l->second.cAlloc - l->second.cFree) <<
                 "," << (l->second.cAlloc) <<
                 "," << (l->second.cFree) <<
                 "," << (l->second.cAlloc - l->second.cFree) <<
