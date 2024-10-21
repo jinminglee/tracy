@@ -213,7 +213,12 @@ private:
         uint32_t incl, excl;
         uint32_t count;
     };
-
+    enum enNameType
+    {
+        ExtraName,
+        FuncitonName,
+        DynamicName        
+    };
     void InitMemory();
     void InitTextEditor();
 
@@ -240,6 +245,10 @@ private:
     void DrawMessages();
     void DrawMessageLine( const MessageData& msg, bool hasCallstack, int& idx );
     void DrawFindZone();
+    void DrawFindFunction();
+    void CacheMemAlloc(const Vector<short_ptr<ZoneEvent>>& zones);
+    void ExportToCsv(std::string filePath, const Vector<short_ptr<ZoneEvent>>& zones);
+    const char *  GetZoneName(const ZoneEvent & zone, enNameType nameType);
     void AccumulationModeComboBox();
     void DrawStatistics();
     void DrawSamplesStatistics(Vector<SymList>& data, int64_t timeRange, AccumulationMode accumulationMode);
@@ -268,7 +277,9 @@ private:
     unordered_flat_map<uint64_t, MemCallstackFrameTree> GetCallstackFrameTreeBottomUp( const MemData& mem ) const;
     unordered_flat_map<uint64_t, MemCallstackFrameTree> GetCallstackFrameTreeTopDown( const MemData& mem ) const;
     void DrawFrameTreeLevel( const unordered_flat_map<uint64_t, MemCallstackFrameTree>& tree, int& idx );
-    void DrawZoneList( int id, const Vector<short_ptr<ZoneEvent>>& zones );
+
+
+    void DrawZoneList( int id, const Vector<short_ptr<ZoneEvent>>& zones, enNameType extraNameOrPlanName = enNameType::ExtraName);
 
     unordered_flat_map<uint64_t, CallstackFrameTree> GetCallstackFrameTreeBottomUp( const unordered_flat_map<uint32_t, uint64_t>& stacks, bool group ) const;
     unordered_flat_map<uint64_t, CallstackFrameTree> GetCallstackFrameTreeTopDown( const unordered_flat_map<uint32_t, uint64_t>& stacks, bool group ) const;
@@ -587,7 +598,13 @@ private:
     void(*m_cbMainThread)(const std::function<void()>&, bool);
 
     int m_gpuIdx = 0;
-
+    struct stMemAllocOfZone
+    {
+        int64_t cAlloc = 0; // size
+        int64_t cFree = 0; //size
+        int64_t nAlloc = 0; // times
+        int64_t nFree = 0; //times
+    };
     struct FindZone {
         enum : uint64_t { Unselected = std::numeric_limits<uint64_t>::max() - 1 };
         enum class GroupBy : int { Thread, UserText, ZoneName, Callstack, Parent, NoGrouping };
@@ -603,8 +620,10 @@ private:
 
         bool show = false;
         bool ignoreCase = false;
+        bool functionNameOnly = true;
         std::vector<int16_t> match;
         unordered_flat_map<uint64_t, Group> groups;
+        unordered_map<const ZoneEvent*, stMemAllocOfZone> memAllocCached;
         size_t processed;
         uint16_t groupId;
         int selMatch = 0;
@@ -658,6 +677,7 @@ private:
             selGroup = Unselected;
             highlight.active = false;
             samples.counts.clear();
+            memAllocCached.clear();
         }
 
         void ResetMatch()
@@ -717,6 +737,7 @@ private:
         }
     } m_findZone;
 
+    bool m_showFindFunction = true;
     tracy_force_inline uint64_t GetSelectionTarget( const Worker::ZoneThreadData& ev, FindZone::GroupBy groupBy ) const;
 
     struct CompVal

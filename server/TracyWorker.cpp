@@ -2553,7 +2553,7 @@ static bool strstr_nocase( const char* l, const char* r )
     return strstr( ll, rl ) != nullptr;
 }
 
-std::vector<int16_t> Worker::GetMatchingSourceLocation( const char* query, bool ignoreCase ) const
+std::vector<int16_t> Worker::GetMatchingSourceLocation( const char* query, bool ignoreCase, bool checkFunctionOnly ) const
 {
     std::vector<int16_t> match;
 
@@ -2563,7 +2563,7 @@ std::vector<int16_t> Worker::GetMatchingSourceLocation( const char* query, bool 
         const auto it = m_data.sourceLocation.find( m_data.sourceLocationExpand[i] );
         assert( it != m_data.sourceLocation.end() );
         const auto& srcloc = it->second;
-        const auto str = GetString( srcloc.name.active ? srcloc.name : srcloc.function );
+        const auto str = GetString( srcloc.name.active && !checkFunctionOnly ? srcloc.name : srcloc.function );
         bool found = false;
         if( ignoreCase )
         {
@@ -2581,7 +2581,7 @@ std::vector<int16_t> Worker::GetMatchingSourceLocation( const char* query, bool 
 
     for( auto& srcloc : m_data.sourceLocationPayload )
     {
-        const auto str = GetString( srcloc->name.active ? srcloc->name : srcloc->function );
+        const auto str = GetString( srcloc->name.active && !checkFunctionOnly ? srcloc->name : srcloc->function );
         bool found = false;
         if( ignoreCase )
         {

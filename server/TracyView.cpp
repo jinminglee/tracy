@@ -794,6 +794,8 @@ bool View::DrawImpl()
     ImGui::SameLine();
     ToggleButton( ICON_FA_MAGNIFYING_GLASS " Find zone", m_findZone.show );
     ImGui::SameLine();
+    ToggleButton( ICON_FA_MAGNIFYING_GLASS_ARROW_RIGHT " Find function", m_showFindFunction );
+    ImGui::SameLine();
     ToggleButton( ICON_FA_ARROW_UP_WIDE_SHORT " Statistics", m_showStatistics );
     ImGui::SameLine();
     ToggleButton( ICON_FA_MEMORY " Memory", m_memInfo.show );
@@ -1001,6 +1003,7 @@ bool View::DrawImpl()
     if( m_showOptions ) DrawOptions();
     if( m_showMessages ) DrawMessages();
     if( m_findZone.show ) DrawFindZone();
+    if(m_showFindFunction) DrawFindFunction();
     if( m_showStatistics ) DrawStatistics();
     if( m_memInfo.show ) DrawMemory();
     if( m_memInfo.showAllocList ) DrawAllocList();

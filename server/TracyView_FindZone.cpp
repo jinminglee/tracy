@@ -1,6 +1,10 @@
 #include <numeric>
+#include <fstream>
+#include <iostream>
+
 
 #include "imgui.h"
+#include "TracyFileselector.hpp"
 
 #include "../public/common/TracyStackFrames.hpp"
 #include "TracyFilesystem.hpp"
@@ -17,7 +21,7 @@ extern double s_time;
 #ifndef TRACY_NO_STATISTICS
 void View::FindZones()
 {
-    m_findZone.match = m_worker.GetMatchingSourceLocation( m_findZone.pattern, m_findZone.ignoreCase );
+    m_findZone.match = m_worker.GetMatchingSourceLocation( m_findZone.pattern, m_findZone.ignoreCase, m_findZone.functionNameOnly);
     if( m_findZone.match.empty() ) return;
 
     auto it = m_findZone.match.begin();
@@ -70,21 +74,63 @@ uint64_t View::GetSelectionTarget( const Worker::ZoneThreadData& ev, FindZone::G
     }
 }
 
-void View::DrawZoneList( int id, const Vector<short_ptr<ZoneEvent>>& zones )
+const char * View::GetZoneName(const ZoneEvent & ev, enNameType nameType)
+{
+    auto& srcloc = m_worker.GetSourceLocation( ev.SrcLoc() );
+    switch (nameType)
+    {
+    case ExtraName:
+        if( m_worker.HasZoneExtra( ev ) )
+        {                
+            const auto& extra = m_worker.GetZoneExtra( ev );
+            if( extra.name.Active() )
+            {
+                return m_worker.GetString(extra.name);
+            }
+        }
+        return  m_worker.GetString( srcloc.function );  
+
+        break;
+    case FuncitonName:
+        return  m_worker.GetString( srcloc.function );
+        break;
+    case DynamicName:
+        if( srcloc.name.active )
+        {
+            return ( m_worker.GetString( srcloc.name ) );
+        }
+        return  m_worker.GetString( srcloc.function );
+        break;
+    }
+}
+
+void View::DrawZoneList( int id, const Vector<short_ptr<ZoneEvent>>& zones, enNameType extraNameOrPlanName)
 {
     const auto zsz = zones.size();
-    char buf[32];
+    char buf[32];   
     sprintf( buf, "%i##zonelist", id );
-    if( !ImGui::BeginTable( buf, 3, ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_Resizable | ImGuiTableFlags_Hideable | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Sortable | ImGuiTableFlags_ScrollY, ImVec2( 0, ImGui::GetTextLineHeightWithSpacing() * std::min<size_t>( zsz + 1, 15 ) ) ) )
+    if( !ImGui::BeginTable( buf, 4, ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_Resizable | ImGuiTableFlags_Hideable | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Sortable | ImGuiTableFlags_ScrollY, ImVec2( 0, ImGui::GetTextLineHeightWithSpacing() * std::min<size_t>( zsz + 1, 30 ) ) ) )
     {
         ImGui::TreePop();
         return;
     }
+    CacheMemAlloc(zones);
+
+    // cached.
     ImGui::TableSetupScrollFreeze( 0, 1 );
     ImGui::TableSetupColumn( "Time from start" );
     ImGui::TableSetupColumn( "Execution time", ImGuiTableColumnFlags_PreferSortDescending );
+    ImGui::TableSetupColumn( "Mem alloc", ImGuiTableColumnFlags_PreferSortDescending );
     ImGui::TableSetupColumn( "Name", ImGuiTableColumnFlags_NoSort );
     ImGui::TableHeadersRow();
+
+    enum ColumName
+    {
+        TimeFromStart,
+        ExecuteTime,
+        MemAlloc,
+        Name,
+    };
 
     const Vector<short_ptr<ZoneEvent>>* zonesToIterate = &zones;
     Vector<short_ptr<ZoneEvent>> sortedZones;
@@ -98,11 +144,11 @@ void View::DrawZoneList( int id, const Vector<short_ptr<ZoneEvent>>& zones )
 
         switch( sortspec.ColumnIndex )
         {
-        case 0:
+        case ColumName::TimeFromStart:
             assert( sortspec.SortDirection != ImGuiSortDirection_Descending );
             std::reverse( sortedZones.begin(), sortedZones.end() );
             break;
-        case 1:
+        case ColumName::ExecuteTime:
             if( m_findZone.selfTime )
             {
                 if( sortspec.SortDirection == ImGuiSortDirection_Descending )
@@ -163,23 +209,41 @@ void View::DrawZoneList( int id, const Vector<short_ptr<ZoneEvent>>& zones )
                 }
             }
             break;
-        case 2:
+        case ColumName::Name:
             if( sortspec.SortDirection == ImGuiSortDirection_Descending )
             {
-                pdqsort_branchless( sortedZones.begin(), sortedZones.end(), [this]( const auto& lhs, const auto& rhs ) {
+                pdqsort_branchless( sortedZones.begin(), sortedZones.end(), [this,  extraNameOrPlanName]( const auto& lhs, const auto& rhs ) {
                     const auto hle = m_worker.HasZoneExtra( *lhs );
                     const auto hre = m_worker.HasZoneExtra( *rhs );
                     if( !( hle & hre ) ) return hle > hre;
-                    return strcmp( m_worker.GetString( m_worker.GetZoneExtra( *lhs ).name ), m_worker.GetString( m_worker.GetZoneExtra( *rhs ).name ) ) < 0;
+                    return strcmp( GetZoneName( *lhs , extraNameOrPlanName), GetZoneName( *rhs , extraNameOrPlanName)) < 0;
                     } );
             }
             else
             {
-                pdqsort_branchless( sortedZones.begin(), sortedZones.end(), [this]( const auto& lhs, const auto& rhs ) {
+                pdqsort_branchless( sortedZones.begin(), sortedZones.end(), [this, extraNameOrPlanName]( const auto& lhs, const auto& rhs ) {
                     const auto hle = m_worker.HasZoneExtra( *lhs );
                     const auto hre = m_worker.HasZoneExtra( *rhs );
                     if( !( hle & hre ) ) return hle < hre;
-                    return strcmp( m_worker.GetString( m_worker.GetZoneExtra( *lhs ).name ), m_worker.GetString( m_worker.GetZoneExtra( *rhs ).name ) ) > 0;
+                    return strcmp( GetZoneName( *lhs , extraNameOrPlanName), GetZoneName( *rhs , extraNameOrPlanName)) > 0;
+                    } );
+            }
+            break;
+        case ColumName::MemAlloc:
+            if( sortspec.SortDirection == ImGuiSortDirection_Descending )
+            {
+                pdqsort_branchless( sortedZones.begin(), sortedZones.end(), [this]( const auto& lhs, const auto& rhs ) {            
+                    auto l = m_findZone.memAllocCached.find(lhs);
+                    auto r = m_findZone.memAllocCached.find(rhs);                    
+                    return l->second.cAlloc > r->second.cAlloc;
+                } );
+            }
+            else
+            {
+                pdqsort_branchless( sortedZones.begin(), sortedZones.end(), [this]( const auto& lhs, const auto& rhs ) {
+                    auto l = m_findZone.memAllocCached.find(lhs);
+                    auto r = m_findZone.memAllocCached.find(rhs);    
+                    return l->second.cAlloc < r->second.cAlloc;
                     } );
             }
             break;
@@ -233,14 +297,10 @@ void View::DrawZoneList( int id, const Vector<short_ptr<ZoneEvent>>& zones )
             ImGui::TableNextColumn();
             ImGui::TextUnformatted( TimeToString( timespan ) );
             ImGui::TableNextColumn();
-            if( m_worker.HasZoneExtra( *ev ) )
-            {
-                const auto& extra = m_worker.GetZoneExtra( *ev );
-                if( extra.name.Active() )
-                {
-                    ImGui::TextUnformatted( m_worker.GetString( extra.name ) );
-                }
-            }
+            auto mem = m_findZone.memAllocCached.find(ev);
+            ImGui::TextUnformatted( MemSizeToString(mem->second.cAlloc));
+            ImGui::TableNextColumn();            
+            ImGui::TextUnformatted( GetZoneName(* ev, extraNameOrPlanName) );
             if( m_zoneHover == ev ) ImGui::PopStyleColor();
             ImGui::PopID();
         }
@@ -248,7 +308,203 @@ void View::DrawZoneList( int id, const Vector<short_ptr<ZoneEvent>>& zones )
     ImGui::EndTable();
     ImGui::TreePop();
 }
+void View::ExportToCsv(std::string filePath, const Vector<short_ptr<ZoneEvent>>& zones)
+{
+    CacheMemAlloc(zones);
 
+    // Sort
+    Vector<short_ptr<ZoneEvent>> sortedZones;
+    sortedZones.reserve_and_use( zones.size() );
+    memcpy( sortedZones.data(), zones.data(), zones.size() * sizeof( decltype( *zones.begin() ) ) );
+    pdqsort_branchless( sortedZones.begin(), sortedZones.end(), [this]( const auto& lhs, const auto& rhs )
+        {            
+       auto l = m_findZone.memAllocCached.find(lhs);
+       auto r = m_findZone.memAllocCached.find(rhs);                    
+       return l->second.cAlloc > r->second.cAlloc;
+   } );
+    
+    // save to csv file
+    std::ofstream outFile(filePath);
+    if (outFile.is_open())
+    {
+        outFile << "Name,MemAlloc,MemFree,MemChanged,MemAllocTimes,MemFreeTimes,ExecuteTime,SelfTime,Function"<<std::endl;
+        for (auto sorted_zone : sortedZones)
+        {  
+            int64_t selfTimespan;
+            selfTimespan = m_worker.GetZoneEndDirect( *sorted_zone ) - sorted_zone->Start();
+            selfTimespan -= GetZoneChildTimeFast( *sorted_zone );
+           
+            auto l = m_findZone.memAllocCached.find(sorted_zone);
+            outFile << GetZoneName(*sorted_zone, DynamicName) <<
+                "," << MemSizeToString(l->second.cAlloc) <<
+                "," << MemSizeToString(l->second.cFree) <<
+                "," << MemSizeToString(l->second.cAlloc - l->second.cFree) <<
+               "," << l->second.nAlloc <<
+               "," << l->second.nFree <<
+                   "," << TimeToString( m_worker.GetZoneEndDirect( *sorted_zone ) - sorted_zone->Start() ) <<
+ "," << TimeToString( selfTimespan ) <<
+                   "," << GetZoneName(*sorted_zone, FuncitonName) <<
+                   std::endl;
+        }
+    }
+    else
+    {
+        return; // 返回错误代码
+    }
+    outFile.close();
+}
+void View::CacheMemAlloc(const Vector<short_ptr<ZoneEvent>>& zones)
+{
+    auto getMem = [=](const ZoneEvent& ev, stMemAllocOfZone& outInfo)
+    {
+        outInfo.cAlloc = 0;
+        outInfo.cFree = 0;
+        outInfo.nAlloc = 0;
+        outInfo.nFree = 0;
+        auto& mem = m_worker.GetMemoryNamed( m_zoneInfoMemPool );
+        auto threadData = GetZoneThreadData( ev );
+        const auto end = m_worker.GetZoneEnd( ev );
+        assert( threadData );
+        const auto tid = threadData->id;
+        const auto thread = m_worker.CompressThread( tid );
+
+        auto ait = std::lower_bound( mem.data.begin(), mem.data.end(), ev.Start(), [] ( const auto& l, const auto& r ) { return l.TimeAlloc() < r; } );
+        const auto aend = std::upper_bound( ait, mem.data.end(), end, [] ( const auto& l, const auto& r ) { return l < r.TimeAlloc(); } );
+        auto fit = std::lower_bound( mem.frees.begin(), mem.frees.end(), ev.Start(), [&mem] ( const auto& l, const auto& r ) { return mem.data[l].TimeFree() < r; } );
+        const auto fend = std::upper_bound( fit, mem.frees.end(), end, [&mem] ( const auto& l, const auto& r ) { return l < mem.data[r].TimeFree(); } );
+
+        const auto aDist = std::distance( ait, aend );
+        const auto fDist = std::distance( fit, fend );
+        if( aDist == 0 && fDist == 0 )
+        {
+            return;
+        }
+        else
+        {
+
+            auto ait2 = ait;
+            auto fit2 = fit;
+
+            while( ait != aend )
+            {
+                if( ait->ThreadAlloc() == thread )
+                {
+                    outInfo.cAlloc += ait->Size();
+                    outInfo.nAlloc++;
+                }
+                ait++;
+            }
+            while( fit != fend )
+            {
+                if( mem.data[*fit].ThreadFree() == thread )
+                {
+                    outInfo.cFree += mem.data[*fit].Size();
+                    outInfo.nFree++;
+                }
+                fit++;
+            }
+            return;
+        }
+    };
+
+    for (auto z : zones)
+    {
+        if(!m_findZone.memAllocCached.contains(z.get()))
+        {
+            stMemAllocOfZone mem;
+            getMem(*z, mem);
+            m_findZone.memAllocCached.emplace(z.get(), mem);            
+        }
+    }
+   
+}
+void View::DrawFindFunction()
+{
+    bool preShow =  m_showFindFunction;
+    const auto scale = GetScale();
+    ImGui::SetNextWindowSize( ImVec2( 1800 * scale, 800 * scale ), ImGuiCond_FirstUseEver );
+    bool show = true;
+    ImGui::Begin( "Find zones", &m_showFindFunction, ImGuiWindowFlags_NoScrollbar );
+    if( ImGui::GetCurrentWindowRead()->SkipItems ) { ImGui::End(); return; }
+
+
+    ImGui::Checkbox( "Function Only", &m_findZone.functionNameOnly);
+    ImGui::SameLine();
+    bool findClicked = false;
+    findClicked |= ImGui::InputText( "###findzone", m_findZone.pattern, 1024, ImGuiInputTextFlags_EnterReturnsTrue );
+
+    findClicked |= ImGui::Button( ICON_FA_MAGNIFYING_GLASS " Find" );
+    ImGui::SameLine();
+
+    if( ImGui::Button( ICON_FA_BAN " Clear" ) )
+    {
+        m_findZone.Reset();
+    }
+
+    ImGui::SameLine();
+    const char* Names[] = { "ExtraName", "FunctionName", "DynamicName"};
+    static int item_current = 0;
+    ImGui::Combo("Names", &item_current, Names, IM_ARRAYSIZE(Names));
+
+    ImGui::SameLine();
+    ImGui::Checkbox( "Ignore case", &m_findZone.ignoreCase );
+    ImGui::SameLine();
+    ImGui::Spacing();
+    ImGui::SameLine();
+
+    if(findClicked)
+    {
+        m_findZone.Reset();
+        FindZones();
+    }
+
+    if( !m_findZone.match.empty() )
+    {
+        Vector<short_ptr<ZoneEvent>> matchZones;
+        matchZones.reserve(2048);
+
+        ImGui::SameLine();
+        ImGui::TextDisabled( "(%zu)", m_findZone.match.size() );
+
+        int idx = 0;
+        for( auto& v : m_findZone.match )
+        {
+            auto& zones = m_worker.GetZonesForSourceLocation( v ).zones;
+
+            for( auto& v : zones )
+            {   
+                matchZones.push_back(v.Zone());
+            }
+        }
+        
+        if( ImGui::TreeNodeEx( "Zone list" ) )
+        {
+            if( ImGui::Button( ICON_FA_FILE_ARROW_DOWN " Export csv" ) )
+            {
+                auto cb = [this, &matchZones]( const char* fn ) {
+                    std::string fileName = fn;
+                    if(fileName.find(".csv") == std::string::npos)
+                    {
+                        fileName += ".csv";
+                    }                   
+                    ExportToCsv(fileName, matchZones);
+                };
+#ifndef TRACY_NO_FILESELECTOR
+                Fileselector::SaveFile( "csv", "csv file", cb );
+#else
+                cb( "export.csv" );
+#endif
+            }
+            DrawZoneList(111, matchZones, enNameType(item_current));
+        }
+    }
+    ImGui::End();
+    if(preShow && !m_showFindFunction)
+    {
+        m_findZone.Reset();
+    }    
+}
+    
 void View::DrawFindZone()
 {
     if( m_shortcut == ShortcutAction::OpenFind ) ImGui::SetNextWindowFocus();
@@ -293,6 +549,8 @@ void View::DrawFindZone()
     }
     ImGui::SameLine();
     ImGui::Checkbox( "Ignore case", &m_findZone.ignoreCase );
+    ImGui::SameLine();
+    ImGui::Checkbox( "Check Function Only", &m_findZone.functionNameOnly);
     ImGui::SameLine();
     ImGui::Spacing();
     ImGui::SameLine();

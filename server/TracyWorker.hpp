@@ -592,7 +592,7 @@ public:
     tracy_force_inline const bool HasZoneExtra( const ZoneEvent& ev ) const { return ev.extra != 0; }
     tracy_force_inline const ZoneExtra& GetZoneExtra( const ZoneEvent& ev ) const { return m_data.zoneExtra[ev.extra]; }
 
-    std::vector<int16_t> GetMatchingSourceLocation( const char* query, bool ignoreCase ) const;
+    std::vector<int16_t> GetMatchingSourceLocation( const char* query, bool ignoreCase, bool checkFunctionOnly = false) const;
 
     const unordered_flat_map<uint64_t, SymbolData>& GetSymbolMap() const { return m_data.symbolMap; }
 
